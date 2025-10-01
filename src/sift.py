@@ -8,7 +8,7 @@ if img is None:
 else : 
     keypoints, descriptors = sift.detectAndCompute(img, None)
 
-    img_with_keypoints = cv2.drawKeypoints(img, keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    img_with_keypoints = cv2.drawKeypoints(img, keypoints, None, color=(0, 0, 255), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
     # Affichage avec matplotlib
     plt.figure(figsize=(10, 8))
@@ -24,7 +24,7 @@ if img is None:
 else :
     keypoints, descriptors = sift.detectAndCompute(img, None)
 
-    img_with_keypoints = cv2.drawKeypoints(img, keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    img_with_keypoints = cv2.drawKeypoints(img, keypoints, None, color=(0, 0, 255), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
     # Affichage avec matplotlib
     plt.figure(figsize=(10, 8))
