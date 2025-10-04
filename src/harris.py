@@ -249,7 +249,7 @@ def classify_test_folder(test_dir, features, ncc_thresh=0.5, ratio=0.5, dist_thr
             harris_threshold=harris_threshold,
             wid=wid
         )
-
+        
         results[img_name] = (landmark, ref_img, score)
         print(f"[{img_name}] -> Landmark: {landmark}, Ref: {ref_img}, Matches: {score}")
 
