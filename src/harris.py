@@ -2,107 +2,199 @@ import os
 import numpy as np
 from PIL import Image
 from scipy.ndimage import gaussian_filter
+import matplotlib.pyplot as plt
 
-# %%  
-def convert_to_grayscale(im):
-    if im.ndim == 3:
-        im = np.mean(im, axis=2)
-    return im
 
-# %%  
+# ===================== Prétraitement =====================
+def preprocess_image(img_path, target_size=None, sigma=1):
+    """
+    Standard preprocessing:
+    - grayscale
+    - resize (optional)
+    - normalize (zero mean, unit variance)
+    - gaussian smoothing
+    """
+    im = np.array(Image.open(img_path).convert('L'), dtype=np.float32)
+    if target_size:
+        im = np.array(Image.fromarray(im).resize(target_size, Image.BICUBIC), dtype=np.float32)
+    im = (im - np.mean(im)) / (np.std(im) + 1e-8)
+    return gaussian_filter(im, sigma=sigma)
+
+
+# ===================== Harris =====================
 def compute_harris_response(im, sigma=3):
-    """ Compute the Harris corner detector response function
-    for each pixel in a graylevel image. """
-    # derivatives
-    imx = np.zeros(im.shape)
-    gaussian_filter(im, (sigma,sigma), (0,1), imx)
-    imy = np.zeros(im.shape)
-    gaussian_filter(im, (sigma,sigma), (1,0), imy)
-    # compute components of the Harris matrix
-    Wxx = gaussian_filter(imx*imx, sigma)
-    Wxy = gaussian_filter(imx*imy, sigma)
-    Wyy = gaussian_filter(imy*imy, sigma)
-    # determinant and trace
-    Wdet = Wxx*Wyy - Wxy**2
+    """ Harris corner response. """
+    imx = np.zeros_like(im)
+    imy = np.zeros_like(im)
+    gaussian_filter(im, (sigma, sigma), (0, 1), imx)
+    gaussian_filter(im, (sigma, sigma), (1, 0), imy)
+
+    Wxx = gaussian_filter(imx * imx, sigma)
+    Wxy = gaussian_filter(imx * imy, sigma)
+    Wyy = gaussian_filter(imy * imy, sigma)
+
+    Wdet = Wxx * Wyy - Wxy**2
     Wtr = Wxx + Wyy
-    return Wdet / Wtr
+    return Wdet / (Wtr + 1e-8)
 
-# %%  
+
 def get_harris_points(harrisim, min_dist=10, threshold=0.1):
-    """ Return corners from a Harris response image
-    min_dist is the minimum number of pixels separating
-    corners and image boundary. """
-    # find top corner candidates above a threshold
-    coords = np.array((harrisim > harrisim.max()*threshold).nonzero()).T
-    # ...and their values
-    candidate_values = [harrisim[c[0],c[1]] for c in coords]
-    # sort candidates
-    index = np.argsort(candidate_values)
-    # store allowed point locations in array
-    allowed_locations = np.zeros(harrisim.shape)
-    allowed_locations[min_dist:-min_dist, min_dist:-min_dist] = 1
-    # select the best points taking min_distance into account
-    filtered_coords = []
+    """ Extract Harris points above threshold with min distance. """
+    coords = np.array((harrisim > harrisim.max() * threshold).nonzero()).T
+    values = harrisim[coords[:, 0], coords[:, 1]]
+    index = np.argsort(values)[::-1]  # tri décroissant
+
+    allowed = np.zeros(harrisim.shape, dtype=bool)
+    allowed[min_dist:-min_dist, min_dist:-min_dist] = True
+
+    selected = []
     for i in index:
-        if allowed_locations[coords[i,0], coords[i,1]] == 1:
-            filtered_coords.append(coords[i])
-            allowed_locations[(coords[i,0]-min_dist):(coords[i,0]+min_dist),
-                              (coords[i,1]-min_dist):(coords[i,1]+min_dist)] = 0
-    return filtered_coords
+        y, x = coords[i]
+        if allowed[y, x]:
+            selected.append((y, x))
+            allowed[y - min_dist:y + min_dist + 1, x - min_dist:x + min_dist + 1] = False
+    return selected
 
-# %%  
-def get_descriptors(image, filtered_coords, wid=5):
-    """ For each point return pixel values around the point
-    using a neighbourhood of width 2*wid+1. (Assume points are
-    extracted with min_distance > wid). """
+
+def get_descriptors(image, coords, wid=5):
+    """ Extract patch descriptors around each point. """
     desc = []
-    for coords in filtered_coords:
-        patch = image[coords[0]-wid:coords[0]+wid+1,
-                      coords[1]-wid:coords[1]+wid+1].flatten()
-        desc.append(patch)
-    return desc
+    for y, x in coords:
+        patch = image[y - wid:y + wid + 1, x - wid:x + wid + 1]
+        if patch.shape == (2 * wid + 1, 2 * wid + 1):  # ignore borders
+            desc.append(patch.flatten())
+    return np.array(desc)
 
-# %%  
+
+def plot_harris_points(image, coords):
+    plt.figure(figsize=(6, 6))
+    plt.gray()
+    plt.imshow(image)
+    if coords:
+        plt.plot([x for _, x in coords], [y for y, _ in coords], 'c*')
+    plt.title(f"Harris Points: {len(coords)}")
+    plt.axis('off')
+    plt.show()
+
+
+# ===================== Dataset processing =====================
 def preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=0.3, wid=5):
-    """
-    Parcours toutes les images dans data_dir, standardise, détecte Harris et extrait les descripteurs.
-    Sauvegarde coords + descriptors dans un fichier .txt par image dans feature_dir.
-    
-    data_dir : dossier contenant les dossiers de landmarks
-    feature_dir : dossier où stocker les features
-    """
-    if not os.path.exists(feature_dir):
-        os.makedirs(feature_dir)
+    os.makedirs(feature_dir, exist_ok=True)
 
     for landmark in os.listdir(data_dir):
         landmark_path = os.path.join(data_dir, landmark)
         if not os.path.isdir(landmark_path):
             continue
 
-        out_landmark_path = os.path.join(feature_dir, landmark)
-        if not os.path.exists(out_landmark_path):
-            os.makedirs(out_landmark_path)
+        out_path = os.path.join(feature_dir, landmark)
+        os.makedirs(out_path, exist_ok=True)
 
         for img_name in os.listdir(landmark_path):
             if not img_name.lower().endswith(('.jpg', '.png', '.jpeg')):
                 continue
 
             img_path = os.path.join(landmark_path, img_name)
-            im = np.array(Image.open(img_path).convert('L'))
-            
-            # Standardisation : mettre les pixels centrés autour de 0 avec écart-type 1
-            im_std = (im - np.mean(im)) / (np.std(im) + 1e-8)
-            
-            # Harris
-            harrisim = compute_harris_response(im_std)
-            coords = get_harris_points(harrisim, min_dist=wid+1, threshold=harris_threshold)
-            descriptors = get_descriptors(im_std, coords, wid)
+            im = preprocess_image(img_path)
+            harrisim = compute_harris_response(im)
+            coords = get_harris_points(harrisim, min_dist=wid + 1, threshold=harris_threshold)
+            descriptors = get_descriptors(im, coords, wid)
 
-            # Sauvegarde dans .txt
-            out_file = os.path.join(out_landmark_path, img_name.split('.')[0] + '.txt')
+            plot_harris_points(im, coords)
+
+            out_file = os.path.join(out_path, img_name.rsplit('.', 1)[0] + '.txt')
             with open(out_file, 'w') as f:
                 for c, d in zip(coords, descriptors):
                     line = ','.join(map(str, [c[0], c[1]] + list(d)))
                     f.write(line + '\n')
 
-            print(f"Processed {img_name} for {landmark}, {len(coords)} points saved.")
+            print(f"Processed {img_name} ({landmark}), {len(coords)} points.")
+
+
+# ===================== Matching =====================
+def match(desc1, desc2, locs1, locs2, ncc_thresh=0.6, dist_thresh=200, ratio=0.8):
+    """ Match descriptors using NCC with distance & ratio tests. """
+    matches = []
+    n = desc1.shape[1]
+
+    for i, d1 in enumerate(desc1):
+        d1n = (d1 - np.mean(d1)) / (np.std(d1) + 1e-8)
+        scores = []
+
+        for j, d2 in enumerate(desc2):
+            if np.linalg.norm(np.array(locs1[i]) - np.array(locs2[j])) > dist_thresh:
+                continue
+            d2n = (d2 - np.mean(d2)) / (np.std(d2) + 1e-8)
+            ncc = np.sum(d1n * d2n) / (n - 1)
+            if ncc > ncc_thresh:
+                scores.append((j, 1 - ncc))
+
+        if len(scores) >= 2:
+            scores.sort(key=lambda x: x[1])
+            best, second = scores[:2]
+            if best[1] / (second[1] + 1e-8) < ratio:
+                matches.append((i, best[0]))
+
+    return matches
+
+
+# ===================== Feature IO =====================
+def load_features(feature_dir):
+    """ Load coords + descriptors from txt files. """
+    features = {}
+    for landmark in os.listdir(feature_dir):
+        l_path = os.path.join(feature_dir, landmark)
+        if not os.path.isdir(l_path):
+            continue
+        features[landmark] = {}
+        for f in os.listdir(l_path):
+            if not f.endswith('.txt'):
+                continue
+            coords, desc = [], []
+            with open(os.path.join(l_path, f)) as file:
+                for line in file:
+                    vals = list(map(float, line.strip().split(',')))
+                    coords.append([int(vals[0]), int(vals[1])])
+                    desc.append(np.array(vals[2:]))
+            features[landmark][f] = (coords, np.array(desc))
+    return features
+
+
+# ===================== Classification =====================
+def classify_image(new_img_path, features, ncc_thresh=0.6, harris_threshold=0.2, wid=5, dist_thresh=500, ratio=0.8):
+    im = preprocess_image(new_img_path)
+    harrisim = compute_harris_response(im)
+    coords_new = get_harris_points(harrisim, min_dist=wid + 1, threshold=harris_threshold)
+    desc_new = get_descriptors(im, coords_new, wid)
+
+    plot_harris_points(im, coords_new)
+
+    best_score, best_landmark, best_image = -1, None, None
+    for landmark, images in features.items():
+        for img_name, (coords_ref, desc_ref) in images.items():
+            if len(desc_ref) == 0 or len(desc_new) == 0:
+                continue
+            matches = match(desc_new, desc_ref, coords_new, coords_ref,
+                            dist_thresh=dist_thresh, ratio=ratio, ncc_thresh=ncc_thresh)
+            num = len(matches)
+            print(f"Comparing {img_name} ({landmark}): {num} matches")
+
+            if num > best_score:
+                best_score, best_landmark, best_image = num, landmark, img_name
+
+    return best_landmark, best_image, best_score
+
+
+# ===================== Exemple d'utilisation =====================
+if __name__ == "__main__":
+    data_dir = r"data\images"
+    feature_dir = r"data\features"
+
+    #preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=0.2, wid=5)
+    features = load_features(feature_dir)
+
+    new_img = r"oslo-city-hall.jpg"
+    landmark, ref_img, score = classify_image(new_img, features, ncc_thresh=0.5, dist_thresh=200, ratio=0.5)
+
+    print(f"Nouvelle image classée comme : {landmark}")
+    print(f"Meilleure référence : {ref_img}")
+    print(f"Nombre de correspondances : {score}")
