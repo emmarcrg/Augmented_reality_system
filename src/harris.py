@@ -229,24 +229,57 @@ def plot_image_matches(img1_path, img2_path, ncc_thresh=0.6, harris_threshold=0.
 
     return matches
 
+def classify_test_folder(test_dir, features, ncc_thresh=0.5, ratio=0.5, dist_thresh=200, harris_threshold=0.2, wid=5):
+    """
+    Parcourt toutes les images dans test_dir, applique la classification Harris
+    et retourne un dictionnaire {nom_image: (landmark, ref_img, score)}.
+    """
+    results = {}
+
+    for img_name in os.listdir(test_dir):
+        if not img_name.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.avif')):
+            continue
+
+        img_path = os.path.join(test_dir, img_name)
+        landmark, ref_img, score = classify_image(
+            img_path, features,
+            ncc_thresh=ncc_thresh,
+            dist_thresh=dist_thresh,
+            ratio=ratio,
+            harris_threshold=harris_threshold,
+            wid=wid
+        )
+
+        results[img_name] = (landmark, ref_img, score)
+        print(f"[{img_name}] -> Landmark: {landmark}, Ref: {ref_img}, Matches: {score}")
+
+    return results
 if __name__ == "__main__":
     data_dir = r"data\images"
     feature_dir = r"data\features"
+    test_dir = r"data\test"
 
-    ncc_thresh = 0.5
-    ratio = 0.5
+    ncc_thresh = 0.7
+    ratio = 0.7
     dist_thresh = 200
-    harris_treshold = 0.2
-    #preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=harris_treshold, wid=5)
+    harris_threshold = 0.2
+
+
+    # Génère les features si besoin
+    preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=harris_threshold, wid=5)
+
     features = load_features(feature_dir)
 
-    new_img = r"fram_test.avif"
-    landmark, ref_img, score = classify_image(new_img, features, ncc_thresh=ncc_thresh, dist_thresh=dist_thresh, ratio=ratio)
+    # Classification sur le dossier test
+    results = classify_test_folder(
+        test_dir, features,
+        ncc_thresh=ncc_thresh,
+        ratio=ratio,
+        dist_thresh=dist_thresh,
+        harris_threshold=harris_threshold,
+        wid=5
+    )
 
-    print(f"Nouvelle image classée comme : {landmark}")
-    print(f"Meilleure référence : {ref_img}")
-    print(f"Nombre de correspondances : {score}")
-    
     img1 = r"data\images\opera\opera1.jpg"
     img2 = r"data\images\opera\opera2.jpg"
     #matches = plot_image_matches(img1, img2, ncc_thresh=ncc_thresh, ratio=ratio, dist_thresh=dist_thresh,harris_threshold=harris_treshold, wid=5)
