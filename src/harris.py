@@ -5,7 +5,6 @@ from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 
 
-# ===================== Prétraitement =====================
 def preprocess_image(img_path, target_size=None, sigma=1):
     """
     Standard preprocessing:
@@ -21,7 +20,6 @@ def preprocess_image(img_path, target_size=None, sigma=1):
     return gaussian_filter(im, sigma=sigma)
 
 
-# ===================== Harris =====================
 def compute_harris_response(im, sigma=3):
     """ Harris corner response. """
     imx = np.zeros_like(im)
@@ -77,7 +75,6 @@ def plot_harris_points(image, coords):
     plt.show()
 
 
-# ===================== Dataset processing =====================
 def preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=0.3, wid=5):
     os.makedirs(feature_dir, exist_ok=True)
 
@@ -110,7 +107,6 @@ def preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=0.3, wid=5
             print(f"Processed {img_name} ({landmark}), {len(coords)} points.")
 
 
-# ===================== Matching =====================
 def match(desc1, desc2, locs1, locs2, ncc_thresh=0.6, dist_thresh=200, ratio=0.8):
     """ Match descriptors using NCC with distance & ratio tests. """
     matches = []
@@ -137,7 +133,6 @@ def match(desc1, desc2, locs1, locs2, ncc_thresh=0.6, dist_thresh=200, ratio=0.8
     return matches
 
 
-# ===================== Feature IO =====================
 def load_features(feature_dir):
     """ Load coords + descriptors from txt files. """
     features = {}
@@ -159,7 +154,6 @@ def load_features(feature_dir):
     return features
 
 
-# ===================== Classification =====================
 def classify_image(new_img_path, features, ncc_thresh=0.6, harris_threshold=0.2, wid=5, dist_thresh=500, ratio=0.8):
     im = preprocess_image(new_img_path)
     harrisim = compute_harris_response(im)
@@ -184,17 +178,76 @@ def classify_image(new_img_path, features, ncc_thresh=0.6, harris_threshold=0.2,
     return best_landmark, best_image, best_score
 
 
-# ===================== Exemple d'utilisation =====================
+def plot_image_matches(img1_path, img2_path, ncc_thresh=0.6, harris_threshold=0.3, wid=5, dist_thresh=200, ratio=0.8):
+    """
+    Affiche deux images avec leurs points Harris détectés et les correspondances (matches).
+    """
+    # Prétraitement
+    im1 = preprocess_image(img1_path)
+    im2 = preprocess_image(img2_path)
+
+    # Harris + descripteurs
+    harrisim1 = compute_harris_response(im1)
+    harrisim2 = compute_harris_response(im2)
+    coords1 = get_harris_points(harrisim1, min_dist=wid + 1, threshold=harris_threshold)
+    coords2 = get_harris_points(harrisim2, min_dist=wid + 1, threshold=harris_threshold)
+    desc1 = get_descriptors(im1, coords1, wid)
+    desc2 = get_descriptors(im2, coords2, wid)
+
+    # Match
+    matches = match(desc1, desc2, coords1, coords2,
+                    ncc_thresh=ncc_thresh, dist_thresh=dist_thresh, ratio=ratio)
+
+    # Plot côte à côte
+    plt.figure(figsize=(12, 6))
+    plt.gray()
+
+    # Concaténer horizontalement
+    h1, w1 = im1.shape
+    h2, w2 = im2.shape
+    h = max(h1, h2)
+    concat_img = np.zeros((h, w1 + w2))
+    concat_img[:h1, :w1] = im1
+    concat_img[:h2, w1:w1 + w2] = im2
+    plt.imshow(concat_img)
+
+    # Points Harris
+    for y, x in coords1:
+        plt.plot(x, y, 'ro', markersize=3)
+    for y, x in coords2:
+        plt.plot(x + w1, y, 'ro', markersize=3)
+
+    # Lignes de correspondance
+    for i, j in matches:
+        y1, x1 = coords1[i]
+        y2, x2 = coords2[j]
+        plt.plot([x1, x2 + w1], [y1, y2], 'c-', linewidth=0.7)
+
+    plt.title(f"{len(matches)} matches trouvés")
+    plt.axis('off')
+    plt.show()
+
+    return matches
+
 if __name__ == "__main__":
     data_dir = r"data\images"
     feature_dir = r"data\features"
 
-    #preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=0.2, wid=5)
+    ncc_thresh = 0.5
+    ratio = 0.5
+    dist_thresh = 200
+    harris_treshold = 0.2
+    #preprocess_harris_dataset(data_dir, feature_dir, harris_threshold=harris_treshold, wid=5)
     features = load_features(feature_dir)
 
-    new_img = r"oslo-city-hall.jpg"
-    landmark, ref_img, score = classify_image(new_img, features, ncc_thresh=0.5, dist_thresh=200, ratio=0.5)
+    new_img = r"fram_test.avif"
+    landmark, ref_img, score = classify_image(new_img, features, ncc_thresh=ncc_thresh, dist_thresh=dist_thresh, ratio=ratio)
 
     print(f"Nouvelle image classée comme : {landmark}")
     print(f"Meilleure référence : {ref_img}")
     print(f"Nombre de correspondances : {score}")
+    
+    img1 = r"data\images\opera\opera1.jpg"
+    img2 = r"data\images\opera\opera2.jpg"
+    #matches = plot_image_matches(img1, img2, ncc_thresh=ncc_thresh, ratio=ratio, dist_thresh=dist_thresh,harris_threshold=harris_treshold, wid=5)
+
